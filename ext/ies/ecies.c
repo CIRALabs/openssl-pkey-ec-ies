@@ -28,32 +28,35 @@ int ECDH_KDF_X9_62(unsigned char *out, size_t outlen,
 		   const unsigned char *sinfo, size_t sinfolen,
 		   const EVP_MD *md)
 {
-    EVP_MD_CTX mctx;
+    EVP_MD_CTX *mctx;
     int rv = 0;
     unsigned int i;
     size_t mdlen;
     unsigned char ctr[4];
+
+    mctx = EVP_MD_CTX_new();
+
     if (sinfolen > ECDH_KDF_MAX || outlen > ECDH_KDF_MAX || Zlen > ECDH_KDF_MAX)
 	return 0;
     mdlen = EVP_MD_size(md);
-    EVP_MD_CTX_init(&mctx);
+    EVP_MD_CTX_init(mctx);
     for (i = 1;;i++)
     {
 	unsigned char mtmp[EVP_MAX_MD_SIZE];
-	EVP_DigestInit_ex(&mctx, md, NULL);
+	EVP_DigestInit_ex(mctx, md, NULL);
 	ctr[3] = i & 0xFF;
 	ctr[2] = (i >> 8) & 0xFF;
 	ctr[1] = (i >> 16) & 0xFF;
 	ctr[0] = (i >> 24) & 0xFF;
-	if (!EVP_DigestUpdate(&mctx, Z, Zlen))
+	if (!EVP_DigestUpdate(mctx, Z, Zlen))
 	    goto err;
-	if (!EVP_DigestUpdate(&mctx, ctr, sizeof(ctr)))
+	if (!EVP_DigestUpdate(mctx, ctr, sizeof(ctr)))
 	    goto err;
-	if (!EVP_DigestUpdate(&mctx, sinfo, sinfolen))
+	if (!EVP_DigestUpdate(mctx, sinfo, sinfolen))
 	    goto err;
 	if (outlen >= mdlen)
 	{
-	    if (!EVP_DigestFinal(&mctx, out, NULL))
+	    if (!EVP_DigestFinal(mctx, out, NULL))
 		goto err;
 	    outlen -= mdlen;
 	    if (outlen == 0)
@@ -62,7 +65,7 @@ int ECDH_KDF_X9_62(unsigned char *out, size_t outlen,
 	}
 	else
 	{
-	    if (!EVP_DigestFinal(&mctx, mtmp, NULL))
+	    if (!EVP_DigestFinal(mctx, mtmp, NULL))
 		goto err;
 	    memcpy(out, mtmp, outlen);
 	    OPENSSL_cleanse(mtmp, mdlen);
@@ -71,7 +74,7 @@ int ECDH_KDF_X9_62(unsigned char *out, size_t outlen,
     }
     rv = 1;
   err:
-    EVP_MD_CTX_cleanup(&mctx);
+    EVP_MD_CTX_free(mctx);
     return rv;
 }
 
@@ -200,38 +203,39 @@ static int store_cipher_body(
     int out_len, len_sum = 0;
     size_t expected_len = cryptogram_body_length(cryptogram);
     unsigned char iv[EVP_MAX_IV_LENGTH];
-    EVP_CIPHER_CTX cipher;
+    EVP_CIPHER_CTX *cipher;
     unsigned char *body;
+
+    cipher = EVP_CIPHER_CTX_new();
 
     /* For now we use an empty initialization vector. */
     memset(iv, 0, EVP_MAX_IV_LENGTH);
 
-    EVP_CIPHER_CTX_init(&cipher);
     body = cryptogram_body_data(cryptogram);
 
-    if (EVP_EncryptInit_ex(&cipher, ctx->cipher, NULL, envelope_key, iv) != 1
-	|| EVP_EncryptUpdate(&cipher, body, &out_len, data, length) != 1) {
+    if (EVP_EncryptInit_ex(cipher, ctx->cipher, NULL, envelope_key, iv) != 1
+	|| EVP_EncryptUpdate(cipher, body, &out_len, data, length) != 1) {
 	SET_OSSL_ERROR("Error while trying to secure the data using the symmetric cipher");
-	EVP_CIPHER_CTX_cleanup(&cipher);
+	EVP_CIPHER_CTX_cleanup(cipher);
 	return 0;
     }
 
     if (expected_len < (size_t)out_len) {
 	SET_ERROR("The symmetric cipher overflowed");
-	EVP_CIPHER_CTX_cleanup(&cipher);
+	EVP_CIPHER_CTX_cleanup(cipher);
 	return 0;
     }
 
     body += out_len;
     len_sum += out_len;
-    if (EVP_EncryptFinal_ex(&cipher, body, &out_len) != 1) {
+    if (EVP_EncryptFinal_ex(cipher, body, &out_len) != 1) {
 	SET_OSSL_ERROR("Error while finalizing the data using the symmetric cipher");
-	EVP_CIPHER_CTX_cleanup(&cipher);
+	EVP_CIPHER_CTX_cleanup(cipher);
 	cryptogram_free(cryptogram);
 	return 0;
     }
 
-    EVP_CIPHER_CTX_cleanup(&cipher);
+    EVP_CIPHER_CTX_free(cipher);
 
     if (expected_len < (size_t)len_sum) {
 	SET_ERROR("The symmetric cipher overflowed");
@@ -246,20 +250,20 @@ static int store_mac_tag(const ies_ctx_t *ctx, const unsigned char *envelope_key
     const size_t key_length = EVP_MD_size(ctx->md);
     const size_t mac_length = cryptogram_mac_length(cryptogram);
     unsigned int out_len;
-    HMAC_CTX hmac;
+    HMAC_CTX *hmac;
 
-    HMAC_CTX_init(&hmac);
+    hmac = HMAC_CTX_new();
 
     /* Generate hash tag using encrypted data */
-    if (HMAC_Init_ex(&hmac, envelope_key + key_offset, key_length, ctx->md, NULL) != 1
-	|| HMAC_Update(&hmac, cryptogram_body_data(cryptogram), cryptogram_body_length(cryptogram)) != 1
-	|| HMAC_Final(&hmac, cryptogram_mac_data(cryptogram), &out_len) != 1) {
+    if (HMAC_Init_ex(hmac, envelope_key + key_offset, key_length, ctx->md, NULL) != 1
+	|| HMAC_Update(hmac, cryptogram_body_data(cryptogram), cryptogram_body_length(cryptogram)) != 1
+	|| HMAC_Final(hmac, cryptogram_mac_data(cryptogram), &out_len) != 1) {
 	SET_OSSL_ERROR("Unable to generate tag");
-	HMAC_CTX_cleanup(&hmac);
+	HMAC_CTX_free(hmac);
 	return 0;
     }
 
-    HMAC_CTX_cleanup(&hmac);
+    HMAC_CTX_free(hmac);
 
     if (out_len != mac_length) {
 	SET_ERROR("MAC length expectation does not meet");
@@ -450,21 +454,21 @@ static int verify_mac(const ies_ctx_t *ctx, const cryptogram_t *cryptogram, cons
     const size_t key_length = EVP_MD_size(ctx->md);
     const size_t mac_length = cryptogram_mac_length(cryptogram);
     unsigned int out_len;
-    HMAC_CTX hmac;
+    HMAC_CTX *hmac;
     unsigned char md[EVP_MAX_MD_SIZE];
 
-    HMAC_CTX_init(&hmac);
+    hmac = HMAC_CTX_new();
 
     /* Generate hash tag using encrypted data */
-    if (HMAC_Init_ex(&hmac, envelope_key + key_offset, key_length, ctx->md, NULL) != 1
-	|| HMAC_Update(&hmac, cryptogram_body_data(cryptogram), cryptogram_body_length(cryptogram)) != 1
-	|| HMAC_Final(&hmac, md, &out_len) != 1) {
+    if (HMAC_Init_ex(hmac, envelope_key + key_offset, key_length, ctx->md, NULL) != 1
+	|| HMAC_Update(hmac, cryptogram_body_data(cryptogram), cryptogram_body_length(cryptogram)) != 1
+	|| HMAC_Final(hmac, md, &out_len) != 1) {
 	SET_OSSL_ERROR("Unable to generate tag");
-	HMAC_CTX_cleanup(&hmac);
+	HMAC_CTX_free(hmac);
 	return 0;
     }
 
-    HMAC_CTX_cleanup(&hmac);
+    HMAC_CTX_free(hmac);
 
     if (out_len != mac_length) {
 	SET_ERROR("MAC length expectation does not meet");
@@ -485,7 +489,7 @@ unsigned char *decrypt_body(const ies_ctx_t *ctx, const cryptogram_t *cryptogram
     size_t output_sum;
     const size_t body_length = cryptogram_body_length(cryptogram);
     unsigned char iv[EVP_MAX_IV_LENGTH], *block, *output;
-    EVP_CIPHER_CTX cipher;
+    EVP_CIPHER_CTX *cipher;
 
     if (!(output = malloc(body_length + 1))) {
 	SET_ERROR("Failed to allocate memory for clear text");
@@ -496,28 +500,28 @@ unsigned char *decrypt_body(const ies_ctx_t *ctx, const cryptogram_t *cryptogram
     memset(iv, 0, EVP_MAX_IV_LENGTH);
     memset(output, 0, body_length + 1);
 
-    EVP_CIPHER_CTX_init(&cipher);
+    cipher = EVP_CIPHER_CTX_new();
 
     block = output;
-    if (EVP_DecryptInit_ex(&cipher, ctx->cipher, NULL, envelope_key, iv) != 1
-	|| EVP_DecryptUpdate(&cipher, block, &out_len, cryptogram_body_data(cryptogram), body_length) != 1) {
+    if (EVP_DecryptInit_ex(cipher, ctx->cipher, NULL, envelope_key, iv) != 1
+	|| EVP_DecryptUpdate(cipher, block, &out_len, cryptogram_body_data(cryptogram), body_length) != 1) {
 	SET_OSSL_ERROR("Unable to decrypt");
-	EVP_CIPHER_CTX_cleanup(&cipher);
+	EVP_CIPHER_CTX_cleanup(cipher);
 	free(output);
 	return NULL;
     }
     output_sum = out_len;
 
     block += output_sum;
-    if (EVP_DecryptFinal_ex(&cipher, block, &out_len) != 1) {
+    if (EVP_DecryptFinal_ex(cipher, block, &out_len) != 1) {
 	printf("Unable to decrypt the data using the chosen symmetric cipher. {error = %s}\n", ERR_error_string(ERR_get_error(), NULL));
-	EVP_CIPHER_CTX_cleanup(&cipher);
+	EVP_CIPHER_CTX_free(cipher);
 	free(output);
 	return NULL;
     }
     output_sum += out_len;
 
-    EVP_CIPHER_CTX_cleanup(&cipher);
+    EVP_CIPHER_CTX_free(cipher);
 
     *length = output_sum;
 

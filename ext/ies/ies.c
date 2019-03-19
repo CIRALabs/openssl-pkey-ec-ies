@@ -4,16 +4,16 @@ static VALUE eIESError;
 
 static EC_KEY *require_ec_key(VALUE self)
 {
-    const EVP_PKEY *pkey;
-    const EC_KEY *ec;
+    EVP_PKEY *pkey;
+    EC_KEY *ec;
     Data_Get_Struct(self, EVP_PKEY, pkey);
     if (!pkey) {
 	rb_raise(rb_eRuntimeError, "PKEY wasn't initialized!");
     }
-    if (EVP_PKEY_type(pkey->type) != EVP_PKEY_EC) {
+    if (EVP_PKEY_base_id(pkey) != EVP_PKEY_EC) {
 	rb_raise(rb_eRuntimeError, "THIS IS NOT A EC PKEY!");
     }
-    ec = pkey->pkey.ec;
+    ec = EVP_PKEY_get1_EC_KEY(pkey);
     if (ec == NULL)
 	rb_raise(eIESError, "EC_KEY is not initialized");
     return ec;
@@ -43,7 +43,7 @@ static cryptogram_t *ies_rb_string_to_cryptogram(const ies_ctx_t *ctx, const VAL
 
     size_t key_length = ctx->stored_key_length;
     size_t mac_length = EVP_MD_size(ctx->md);
-    const cryptogram_t *cryptogram = cryptogram_alloc(key_length, mac_length, data_len - key_length - mac_length);
+    cryptogram_t *cryptogram = cryptogram_alloc(key_length, mac_length, data_len - key_length - mac_length);
 
     memcpy(cryptogram_key_data(cryptogram), data, data_len);
 
