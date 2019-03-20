@@ -1,12 +1,15 @@
 #include "ies.h"
 
 static VALUE eIESError;
+extern const rb_data_type_t ossl_evp_pkey_type;
 
 static EC_KEY *require_ec_key(VALUE self)
 {
     EVP_PKEY *pkey;
     EC_KEY *ec;
-    Data_Get_Struct(self, EVP_PKEY, pkey);
+
+    TypedData_Get_Struct((self), EVP_PKEY, &ossl_evp_pkey_type, (pkey));
+
     if (!pkey) {
 	rb_raise(rb_eRuntimeError, "PKEY wasn't initialized!");
     }
